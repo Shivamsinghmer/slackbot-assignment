@@ -1,0 +1,126 @@
+@import 'tailwindcss';
+
+@theme {
+  /* ---- Neutrals: cool-tinted, chroma reserved for state ---- */
+  --color-bg: oklch(0.982 0.003 250);
+  --color-surface: oklch(1 0 0);
+  --color-rail: oklch(0.968 0.004 250);
+  --color-line: oklch(0.918 0.005 250);
+  --color-line-soft: oklch(0.95 0.004 250);
+  --color-ink: oklch(0.215 0.014 250);
+  --color-ink-muted: oklch(0.455 0.012 250);
+  --color-ink-faint: oklch(0.522 0.012 250);
+
+  /* ---- Delivery state: the only saturated colour in the interface ---- */
+  --color-sent: oklch(0.52 0.13 150);
+  --color-sent-bg: oklch(0.962 0.032 150);
+  --color-pending: oklch(0.540 0.120 75);
+  --color-pending-bg: oklch(0.965 0.035 75);
+  --color-limited: oklch(0.545 0.140 55);
+  --color-limited-bg: oklch(0.962 0.038 55);
+  --color-failed: oklch(0.535 0.19 25);
+  --color-failed-bg: oklch(0.962 0.032 25);
+
+  /* Blue is focus and selection only — never a delivery state. */
+  --color-focus: oklch(0.540 0.150 250);
+  --color-focus-bg: oklch(0.965 0.03 250);
+
+  --font-ui: 'Inter var', Inter, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', Menlo, monospace;
+
+  --ease-out-quart: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@layer theme {
+  :root {
+    --z-base: 0;
+    --z-sticky: 10;
+    --z-topbar: 20;
+    --z-tooltip: 40;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-ui);
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Numbers are compared down a column everywhere in this UI. */
+table,
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* One focus treatment, used everywhere, distinct from every status colour. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+::placeholder {
+  color: var(--color-ink-faint);
+  opacity: 1;
+}
+
+/* The pending glyph breathes; the rate-limited one breathes faster, so
+   "waiting on Slack" reads differently from "queued". */
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.pulse-slow {
+  animation: pulse-soft 2s var(--ease-out-quart) infinite;
+}
+
+.pulse-fast {
+  animation: pulse-soft 1s var(--ease-out-quart) infinite;
+}
+
+/* A row that just changed state flashes its new tint, then settles. */
+@keyframes settle {
+  from {
+    background-color: var(--flash, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+
+.row-settle {
+  animation: settle 600ms var(--ease-out-quart);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .pulse-slow,
+  .pulse-fast {
+    animation: none;
+    opacity: 1;
+  }
+}

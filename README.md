@@ -24,6 +24,8 @@ completes without losing a single message.
 - **Built-in mock endpoint** — a local webhook that injects 429s, so rate-limit handling can be
   exercised without touching Slack.
 - **Settings dashboard** — React UI for webhook configuration, per-client on/off, and live logs.
+- **Runtime configuration** — delivery target and mock behaviour are editable from the interface, so a
+  deployed instance needs no redeploy to change them.
 
 ---
 
@@ -50,7 +52,7 @@ Tailwind CSS
 ## Prerequisites
 
 - Node.js 20 or newer
-- Docker (for Redis)
+- Docker (for local Redis)
 - A MongoDB connection string — MongoDB Atlas free tier works fine
 
 ---
@@ -149,7 +151,8 @@ Webhook URLs are credentials. `.env` is gitignored and the dashboard masks saved
 | Variable | Default | Purpose |
 |---|---|---|
 | `MONGODB_URI` | — | MongoDB connection string, including the database name |
-| `REDIS_URL` | `redis://localhost:6379` | Redis connection |
+| `REDIS_URL` | `redis://localhost:6379` | Redis connection. A `rediss://` URL enables TLS, which managed providers require |
+| `REDIS_DRAIN_DELAY_SECONDS` | `5` | How long the worker blocks waiting for a job. Raise to `60` on a metered Redis — see [Deploying](#deploying) |
 | `PORT` | `4000` | API port |
 | `API_BASE` | `http://localhost:4000` | Used to build the mock webhook URL |
 | `CORS_ORIGIN` | `http://localhost:5173` | Allowed dashboard origin(s), comma-separated |
@@ -160,7 +163,13 @@ Webhook URLs are credentials. `.env` is gitignored and the dashboard masks saved
 | `ENABLE_CRON` | `false` | Arm the scheduled daily dispatch |
 | `CRON_SCHEDULE` | `0 9 * * *` | When the daily dispatch runs |
 | `CRON_TZ` | `Asia/Kolkata` | Timezone for the schedule |
+| `RUN_WORKER_IN_PROCESS` | `false` | Run the worker inside the API process (single-service hosting) |
+| `AUTO_SEED` | `false` | Seed demo data on first boot if the database is empty |
 | `SLACK_WEBHOOK_1..5` | — | Webhook URLs used as seed data |
+
+`USE_MOCK_SLACK`, `MOCK_429_RATE` and `MOCK_RETRY_AFTER_SECONDS` are **defaults only**. Once changed
+in the dashboard they are stored in the `settings` collection, which takes precedence — see
+[Deploying](#deploying).
 
 Configuration is validated with zod at startup. A missing or malformed value fails immediately with
 a readable message rather than surfacing later inside a job.
@@ -259,6 +268,99 @@ jobs are still in Redis and resume. Job ids are `clientId__reportDate`, so nothi
 
 ---
 
+## Deploying
+
+The blueprint in `render.yaml` deploys the API and the dashboard on Render's free tier. Redis comes
+from **Upstash** and MongoDB from **Atlas**, both free.
+
+### One-time setup
+
+1. Create a free **MongoDB Atlas** M0 cluster. Under Network Access allow `0.0.0.0/0` — Render's free
+   tier has no static outbound IP. Copy the connection string.
+
+2. Create a free **Upstash** Redis database.
+   - Pick a region near your Render region to keep latency down.
+   - Copy the **`rediss://` connection string** from the console — the one under *Redis Connect*, not
+     the REST URL. BullMQ speaks the Redis wire protocol; the REST endpoint will not work.
+   - Turn **eviction off**. BullMQ stores job state in Redis, and an evicted key is a lost job.
+
+3. Push this repository to GitHub.
+
+4. In Render: **New → Blueprint**, select the repository. It reads `render.yaml` and creates the API
+   and the static site.
+
+5. Render prompts for five values:
+
+   | Prompt | Value |
+   |---|---|
+   | `MONGODB_URI` | Atlas connection string, including the database name |
+   | `REDIS_URL` | Upstash `rediss://` connection string |
+   | `API_BASE` | The API service's own URL, e.g. `https://report-dispatch-api.onrender.com` |
+   | `CORS_ORIGIN` | The static site's URL, e.g. `https://report-dispatch-web.onrender.com` |
+   | `VITE_API_BASE` | The API service's URL again — baked into the frontend at build time |
+
+   The two Render URLs only exist after the first deploy, so fill them in and trigger a redeploy.
+   Include the `https://` scheme; the API validates these and rejects a bare hostname.
+
+6. Open the dashboard. It seeds itself with demo clients on first boot, so there is data immediately.
+
+### Upstash and the command budget
+
+Upstash bills per command, and **an idle BullMQ worker is not free**. The worker waits for jobs with a
+blocking read that expires every `drainDelay` seconds, and each expiry costs one command. At BullMQ's
+5-second default that is roughly 17,000 commands a day while doing nothing at all — more than the
+free daily allowance on its own, before a single report is sent.
+
+`REDIS_DRAIN_DELAY_SECONDS` controls this. The blueprint sets it to `60`, cutting idle traffic to
+about 1,400 commands a day.
+
+Raising it costs nothing in responsiveness: the blocking read returns the moment a job is pushed, so
+it does not delay dispatches. Measured with the delay at 60 seconds, the first message left **132 ms**
+after the dispatch request, with the usual one-second spacing after that.
+
+Locally, against a Redis container where commands are free, the 5-second default is fine.
+
+### Configuration after deployment
+
+A deployed instance has no editable `.env`, so the things you would otherwise change there are
+editable in the dashboard instead:
+
+- **Webhook URLs** — per client, in the client settings panel.
+- **Delivery target** — Live Slack or the mock endpoint, under Delivery settings.
+- **Mock rejection rate and `Retry-After`** — sliders under Delivery settings, so rate-limit recovery
+  can be demonstrated on the live URL without a redeploy.
+
+Environment variables still supply the *defaults*; a value changed in the dashboard is stored in the
+`settings` collection and takes precedence. **Reset** restores the deployed defaults.
+
+The 1 message/second delivery rate is deliberately not editable. It is the guarantee the queue exists
+to provide, and BullMQ fixes the limiter when the worker is constructed.
+
+### What differs from local development
+
+- **The worker shares the API process** (`RUN_WORKER_IN_PROCESS=true`). Render's free tier bills a
+  separate Background Worker, so the two run together. The queue, the limiter and the 429 handling
+  are identical — only the process boundary moves. Locally it stays a separate process so its logs
+  are readable on their own.
+- **The scheduler is off** (`ENABLE_CRON=false`). Free instances sleep after roughly 15 minutes of
+  inactivity, so a 09:00 cron would not fire dependably. Dispatches are triggered from the dashboard.
+- **The first request after idle is slow** — 30–60 seconds while the instance wakes. The dashboard
+  shows "API unreachable" until it responds.
+- **Redis is metered, not persistent-by-default.** Upstash's free tier has a daily command budget —
+  see above — and job state lives only in Redis. Delivery history is in MongoDB and survives
+  regardless.
+- **Delivery defaults to the mock endpoint** (`USE_MOCK_SLACK=true`), so a public URL cannot post to
+  Slack until someone switches it deliberately.
+
+### A note on access
+
+The dashboard has no authentication — it was built as an internal tool behind a network boundary.
+On a public URL, anyone who finds it can change webhook URLs and trigger dispatches. Webhook URLs are
+validated against `hooks.slack.com`, so it cannot be pointed at arbitrary hosts, but treat a deployed
+instance as a demo rather than something to leave running with live webhooks configured.
+
+---
+
 ## API
 
 | Method | Route | Purpose |
@@ -270,6 +372,9 @@ jobs are still in Redis and resume. Job ids are `clientId__reportDate`, so nothi
 | `GET` | `/api/logs?limit=50` | Recent delivery history |
 | `POST` | `/api/dispatch/run` | Trigger a dispatch — body `{ date?, useMock? }` |
 | `GET` | `/api/queue/status` | Live BullMQ job counts |
+| `GET` | `/api/settings` | Current runtime settings and the deployed defaults |
+| `PUT` | `/api/settings` | Update delivery target or mock behaviour |
+| `POST` | `/api/settings/reset` | Restore the deployed defaults |
 | `POST` | `/api/mock-slack-webhook` | Local mock webhook that injects 429s |
 
 `POST /api/dispatch/run` runs the same producer the scheduler calls, so a dispatch can be triggered
@@ -286,6 +391,8 @@ daily_stats         { client_id, date, channel, spend_cents, revenue_cents }
 notification_logs   { client_id, client_name, report_date, status, attempts,
                       rate_limit_hits, spend_cents, revenue_cents, roas,
                       target, job_id, last_error, sent_at }
+settings            { _id: 'runtime', use_mock_slack, mock_429_rate,
+                      mock_retry_after_seconds }
 ```
 
 `notification_logs` carries one row per client per report date, upserted on each dispatch. It backs
@@ -304,7 +411,9 @@ server/src/
   queue/slackQueue.ts             Queue definition and job options
   routes/                         clients, logs, dispatch, mock webhook
   scheduler/cron.ts               Daily trigger
-  scripts/seed.ts                 Seed data
+  services/settings.ts            Runtime settings (DB overrides env defaults)
+  services/seedData.ts            Seed data, shared by the script and first boot
+  scripts/seed.ts                 Seed CLI
   scripts/verifyAggregation.ts    Pipeline output inspection
   config/env.ts                   Validated configuration
 client/src/

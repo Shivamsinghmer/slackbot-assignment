@@ -1,4 +1,5 @@
 import { env } from '../config/env.js';
+import { getSettings } from '../services/settings.js';
 import { apiLog } from '../lib/logger.js';
 import { NotificationLog } from '../models/NotificationLog.js';
 import { buildClientReports } from '../services/reportAggregation.js';
@@ -30,7 +31,9 @@ const MOCK_ENDPOINT = `${env.API_BASE}/api/mock-slack-webhook`;
  * pacing that makes it safe — belongs to the worker.
  */
 export async function dispatchDailyReports(opts: DispatchOptions = {}): Promise<DispatchResult> {
-  const useMock = opts.useMock ?? env.USE_MOCK_SLACK;
+  // Explicit per-run override wins; otherwise the operator-editable setting.
+  const settings = await getSettings();
+  const useMock = opts.useMock ?? settings.use_mock_slack;
   const target: 'slack' | 'mock' = useMock ? 'mock' : 'slack';
   const trigger = opts.trigger ?? 'manual';
 

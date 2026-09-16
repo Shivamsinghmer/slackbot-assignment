@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api/client.ts';
-import type { Client, NotificationLog, QueueCounts } from './api/types.ts';
+import type { Client, NotificationLog, QueueCounts, RuntimeSettings } from './api/types.ts';
 import { ClientRail } from './components/ClientRail.tsx';
 import { ClientSettings } from './components/ClientSettings.tsx';
+import { DeliverySettings } from './components/DeliverySettings.tsx';
 import { DeliveryLog } from './components/DeliveryLog.tsx';
 import { TopBar } from './components/TopBar.tsx';
 
@@ -24,9 +25,9 @@ export default function App() {
   const [queue, setQueue] = useState<QueueCounts | null>(null);
   const [apiReachable, setApiReachable] = useState(true);
 
-  // Null until the server reports its mode, so the control can never contradict
-  // the backend's USE_MOCK_SLACK setting.
-  const [useMock, setUseMock] = useState<boolean | null>(null);
+  // Delivery mode is server state, not a local preference — the control can
+  // never contradict what the backend will actually do.
+  const [settings, setSettings] = useState<RuntimeSettings | null>(null);
   const [dispatching, setDispatching] = useState(false);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
 
@@ -49,10 +50,18 @@ export default function App() {
   }, [loadClients]);
 
   useEffect(() => {
-    api
-      .health()
-      .then((h) => setUseMock((current) => (current === null ? h.use_mock_slack : current)))
-      .catch(() => setUseMock((current) => (current === null ? true : current)));
+    api.getSettings().then(setSettings).catch(() => {});
+  }, []);
+
+  const patchSettings = useCallback(
+    async (patch: Partial<Omit<RuntimeSettings, 'defaults'>>) => {
+      setSettings(await api.updateSettings(patch));
+    },
+    [],
+  );
+
+  const resetSettings = useCallback(async () => {
+    setSettings(await api.resetSettings());
   }, []);
 
   // Poll so a running dispatch is visible: rows land about a second apart.
@@ -109,7 +118,7 @@ export default function App() {
     setDispatching(true);
     setNotice(null);
     try {
-      const result = await api.runDispatch({ useMock: useMock ?? true });
+      const result = await api.runDispatch({ useMock: settings?.use_mock_slack ?? true });
       setNotice(
         result.enqueued === 0
           ? {
@@ -133,8 +142,8 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       <TopBar
-        useMock={useMock ?? true}
-        onUseMockChange={setUseMock}
+        useMock={settings?.use_mock_slack ?? true}
+        onUseMockChange={(next) => void patchSettings({ use_mock_slack: next })}
         onDispatch={handleDispatch}
         dispatching={dispatching}
         queue={queue}
@@ -169,6 +178,13 @@ export default function App() {
             loading={clientsLoading}
           />
           {selected && <ClientSettings client={selected} onSave={handleSave} />}
+          {settings && (
+            <DeliverySettings
+              settings={settings}
+              onChange={patchSettings}
+              onReset={resetSettings}
+            />
+          )}
         </aside>
 
         <main className="order-1 flex min-h-0 min-w-0 flex-col bg-surface lg:order-2 lg:flex-1">

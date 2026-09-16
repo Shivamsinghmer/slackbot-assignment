@@ -1,0 +1,90 @@
+# Render Blueprint — deploys the API (with the worker in-process) and the
+# dashboard as a static site, both on Render's free tier.
+#
+# Two managed services are external, each on their own free tier:
+#   MongoDB  -> MongoDB Atlas M0
+#   Redis    -> Upstash
+# Paste their connection strings when Render prompts for MONGODB_URI and
+# REDIS_URL.
+#
+# Deploy: push this repo to GitHub, then Render → New → Blueprint → pick the repo.
+
+services:
+  - type: web
+    name: report-dispatch-api
+    runtime: node
+    plan: free
+    region: oregon
+    rootDir: .
+    buildCommand: npm install && npm run build --workspace server
+    startCommand: node server/dist/index.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Paste your MongoDB Atlas connection string when Render prompts.
+      - key: MONGODB_URI
+        sync: false
+
+      # Upstash connection string. Use the rediss:// (TLS) endpoint from the
+      # Upstash console, NOT the REST URL — BullMQ speaks the Redis protocol.
+      - key: REDIS_URL
+        sync: false
+
+      # Upstash bills per command, and an idle BullMQ worker costs one command
+      # every drainDelay seconds. At the 5s default that is ~17k commands/day
+      # doing nothing, which exceeds the free daily allowance on its own.
+      # 60s cuts it to ~1.4k without delaying jobs — a blocking read still
+      # returns the instant a job is pushed.
+      - key: REDIS_DRAIN_DELAY_SECONDS
+        value: '60'
+
+      # Render's free tier bills a separate Background Worker, so the worker
+      # shares the API process here. The queue, limiter and 429 handling are
+      # unchanged — only the process boundary differs from local development.
+      - key: RUN_WORKER_IN_PROCESS
+        value: 'true'
+
+      # Safe default for a public URL: nothing reaches Slack until an operator
+      # switches the target in the dashboard's Delivery settings.
+      - key: USE_MOCK_SLACK
+        value: 'true'
+      - key: MOCK_429_RATE
+        value: '0.2'
+      - key: MOCK_RETRY_AFTER_SECONDS
+        value: '3'
+
+      # Free instances sleep when idle, so a 09:00 cron would not fire reliably.
+      # Dispatches are triggered from the dashboard instead.
+      - key: ENABLE_CRON
+        value: 'false'
+
+      # Populates demo clients and stats on first boot only, so the deployed
+      # dashboard is not an empty page. Never overwrites existing data.
+      - key: AUTO_SEED
+        value: 'true'
+
+      # These two need the full origin including https://, which fromService
+      # cannot produce (it yields a bare hostname). Render prompts for them.
+      #   API_BASE    -> this API's own URL, used to build the mock webhook URL
+      #   CORS_ORIGIN -> the static site's URL
+      - key: API_BASE
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+
+  - type: web
+    name: report-dispatch-web
+    runtime: static
+    rootDir: .
+    buildCommand: npm install && npm run build --workspace client
+    staticPublishPath: client/dist
+    envVars:
+      # Baked in at build time; must include https://. Render prompts for it.
+      - key: VITE_API_BASE
+        sync: false
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html

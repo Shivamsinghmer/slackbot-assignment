@@ -18,6 +18,13 @@ const schema = z.object({
   MONGODB_URI: z.string().min(1, 'MONGODB_URI is required (Atlas connection string)'),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
 
+  // How long the worker blocks waiting for a job, in seconds. Every expiry of
+  // that block costs one Redis command, which matters on metered hosts like
+  // Upstash: the default of 5s burns ~17k commands/day while completely idle.
+  // Raising it does NOT delay new jobs — the blocking read returns as soon as
+  // one is pushed — it only makes the idle poll less chatty.
+  REDIS_DRAIN_DELAY_SECONDS: z.coerce.number().int().min(1).max(300).default(5),
+
   PORT: z.coerce.number().int().positive().default(4000),
   API_BASE: z.string().url().default('http://localhost:4000'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
@@ -26,6 +33,14 @@ const schema = z.object({
   USE_MOCK_SLACK: boolish(true),
   MOCK_429_RATE: z.coerce.number().min(0).max(1).default(0.2),
   MOCK_RETRY_AFTER_SECONDS: z.coerce.number().int().min(1).default(3),
+
+  // Single-service hosting (free tiers charge for a separate background
+  // worker process) runs the worker inside the API process instead.
+  RUN_WORKER_IN_PROCESS: boolish(false),
+
+  // Seed demo data on first boot if the database is empty. Never overwrites
+  // existing data; exists so a fresh deployment is not a dead page.
+  AUTO_SEED: boolish(false),
 
   ENABLE_CRON: boolish(false),
   CRON_SCHEDULE: z.string().default('0 9 * * *'),

@@ -1,4 +1,5 @@
 import { Worker, UnrecoverableError, type Job } from 'bullmq';
+import { env } from '../config/env.js';
 import { workerLog } from '../lib/logger.js';
 import { NotificationLog } from '../models/NotificationLog.js';
 import { createRedisConnection } from '../queue/connection.js';
@@ -101,6 +102,8 @@ export function createSlackWorker(): Worker<SlackReportJob> {
       connection: createRedisConnection(),
       concurrency: 1,
       limiter: { ...RATE_LIMIT },
+      // Only affects how chatty the idle poll is — see REDIS_DRAIN_DELAY_SECONDS.
+      drainDelay: env.REDIS_DRAIN_DELAY_SECONDS,
     },
   );
 

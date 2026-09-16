@@ -44,3 +44,14 @@ export interface Health {
   use_mock_slack: boolean;
   mock_429_rate: number;
 }
+
+export interface RuntimeSettings {
+  use_mock_slack: boolean;
+  mock_429_rate: number;
+  mock_retry_after_seconds: number;
+  defaults: {
+    use_mock_slack: boolean;
+    mock_429_rate: number;
+    mock_retry_after_seconds: number;
+  };
+}

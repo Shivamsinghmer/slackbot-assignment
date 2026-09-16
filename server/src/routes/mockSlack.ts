@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { env } from '../config/env.js';
 import { apiLog } from '../lib/logger.js';
+import { getSettings } from '../services/settings.js';
 
 /**
  * Stand-in for a Slack incoming webhook.
@@ -12,22 +12,26 @@ import { apiLog } from '../lib/logger.js';
  */
 export const mockSlackRouter = Router();
 
-mockSlackRouter.post('/mock-slack-webhook', (req, res) => {
-  const roll = Math.random();
+mockSlackRouter.post('/mock-slack-webhook', async (req, res, next) => {
+  try {
+    const { mock_429_rate, mock_retry_after_seconds } = await getSettings();
 
-  if (roll < env.MOCK_429_RATE) {
-    apiLog.warn(
-      { retry_after: env.MOCK_RETRY_AFTER_SECONDS },
-      `mock Slack → 429 Too Many Requests (Retry-After: ${env.MOCK_RETRY_AFTER_SECONDS}s)`,
-    );
-    res.set('Retry-After', String(env.MOCK_RETRY_AFTER_SECONDS));
-    res.status(429).type('text/plain').send('rate_limited');
-    return;
+    if (Math.random() < mock_429_rate) {
+      apiLog.warn(
+        { retry_after: mock_retry_after_seconds },
+        `mock Slack → 429 Too Many Requests (Retry-After: ${mock_retry_after_seconds}s)`,
+      );
+      res.set('Retry-After', String(mock_retry_after_seconds));
+      res.status(429).type('text/plain').send('rate_limited');
+      return;
+    }
+
+    const blocks = Array.isArray(req.body?.blocks) ? req.body.blocks.length : 0;
+    apiLog.info({ blocks, text: req.body?.text }, 'mock Slack → 200 ok');
+
+    // Real Slack webhooks answer with the plain string "ok".
+    res.status(200).type('text/plain').send('ok');
+  } catch (err) {
+    next(err);
   }
-
-  const blocks = Array.isArray(req.body?.blocks) ? req.body.blocks.length : 0;
-  apiLog.info({ blocks, text: req.body?.text }, 'mock Slack → 200 ok');
-
-  // Real Slack webhooks answer with the plain string "ok".
-  res.status(200).type('text/plain').send('ok');
 });

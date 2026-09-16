@@ -1,7 +1,21 @@
-import type { Client, DispatchResult, Health, NotificationLog, QueueCounts } from './types.ts';
+import type {
+  Client,
+  DispatchResult,
+  Health,
+  NotificationLog,
+  QueueCounts,
+  RuntimeSettings,
+} from './types.ts';
+
+/**
+ * Empty in development — Vite proxies /api to the backend. In a deployed build
+ * the frontend is a static site on a different origin, so VITE_API_BASE points
+ * at the API service.
+ */
+const API_BASE = (import.meta.env.VITE_API_BASE ?? '').replace(/\/$/, '');
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(`${API_BASE}/api${path}`, {
     headers: { 'Content-Type': 'application/json' },
     ...init,
   });
@@ -28,4 +42,11 @@ export const api = {
     request<DispatchResult>('/dispatch/run', { method: 'POST', body: JSON.stringify(opts) }),
 
   queueStatus: () => request<QueueCounts>('/queue/status'),
+
+  getSettings: () => request<RuntimeSettings>('/settings'),
+
+  updateSettings: (patch: Partial<Omit<RuntimeSettings, 'defaults'>>) =>
+    request<RuntimeSettings>('/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+
+  resetSettings: () => request<RuntimeSettings>('/settings/reset', { method: 'POST' }),
 };

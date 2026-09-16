@@ -459,4 +459,9 @@ it in the Slack app settings and save it again from the dashboard.
 `typescript` and the `@types/*` packages live there. The build command must be
 `npm install --include=dev && …`.
 
-**Worker cannot reach Redis** — confirm the container is healthy with `docker compose ps`.
+**Worker cannot reach Redis** — locally, confirm the container is healthy with `docker compose ps`.
+
+**Deployed: repeated `read ECONNRESET` from the worker, and `/api/queue/status` hangs** — `REDIS_URL`
+is using `redis://` against a managed provider. Upstash and friends accept TLS only and reset a
+plaintext socket immediately. The scheme needs two s's: `rediss://`. The boot log prints
+`Redis reachable (PONG)` when it is right, and warns about the scheme when it is not.

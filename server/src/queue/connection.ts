@@ -23,6 +23,10 @@ export function createRedisConnection(): IORedis {
   });
 }
 
+function isLocalRedis(url: string): boolean {
+  return /\/\/(?:[^@]*@)?(?:localhost|127\.0\.0\.1|\[::1\]|redis)[:/]/.test(url);
+}
+
 /**
  * Proves Redis is actually reachable, and says so plainly in the logs.
  *
@@ -32,6 +36,17 @@ export function createRedisConnection(): IORedis {
  */
 export async function verifyRedis(): Promise<boolean> {
   const started = Date.now();
+
+  // Managed Redis (Upstash, Render Key Value, Redis Cloud) accepts only TLS.
+  // Handing it a plaintext redis:// URL gets the socket reset on every attempt,
+  // which surfaces as an ECONNRESET loop and endpoints that hang forever —
+  // nothing that points at the one missing character.
+  if (!env.REDIS_URL.startsWith('rediss://') && !isLocalRedis(env.REDIS_URL)) {
+    logger.warn(
+      'REDIS_URL uses redis:// against a remote host. Managed providers require TLS — ' +
+        'the scheme almost certainly needs to be rediss:// (two s). Connecting anyway.',
+    );
+  }
   const redis = new IORedis(env.REDIS_URL, {
     maxRetriesPerRequest: 1,
     connectTimeout: 10_000,

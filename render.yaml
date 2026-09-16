@@ -16,7 +16,9 @@ services:
     plan: free
     region: oregon
     rootDir: .
-    buildCommand: npm install && npm run build --workspace server
+    # --include=dev is required: NODE_ENV=production (below) makes npm skip
+    # devDependencies, and typescript plus the @types packages live there.
+    buildCommand: npm install --include=dev && npm run build --workspace server
     startCommand: node server/dist/index.js
     healthCheckPath: /api/health
     envVars:
@@ -78,7 +80,8 @@ services:
     name: report-dispatch-web
     runtime: static
     rootDir: .
-    buildCommand: npm install && npm run build --workspace client
+    # --include=dev: vite and typescript are devDependencies.
+    buildCommand: npm install --include=dev && npm run build --workspace client
     staticPublishPath: client/dist
     envVars:
       # Baked in at build time; must include https://. Render prompts for it.

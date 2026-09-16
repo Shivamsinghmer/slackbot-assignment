@@ -454,4 +454,9 @@ Check `npm run dev` and `curl http://localhost:4000/api/health`.
 **Messages marked `failed` with a 404** — the webhook URL is wrong or has been revoked. Regenerate
 it in the Slack app settings and save it again from the dashboard.
 
+**Deploy fails with `Cannot find name 'process'` or `Could not find a declaration file for module
+'express'`** — the build ran without devDependencies. `NODE_ENV=production` makes npm skip them, and
+`typescript` and the `@types/*` packages live there. The build command must be
+`npm install --include=dev && …`.
+
 **Worker cannot reach Redis** — confirm the container is healthy with `docker compose ps`.

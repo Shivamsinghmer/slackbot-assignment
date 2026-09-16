@@ -1,5 +1,6 @@
 import { env } from '../config/env.js';
 import { getSettings } from '../services/settings.js';
+import { getReportWindow } from '../lib/dates.js';
 import { apiLog } from '../lib/logger.js';
 import { NotificationLog } from '../models/NotificationLog.js';
 import { buildClientReports } from '../services/reportAggregation.js';
@@ -37,12 +38,18 @@ export async function dispatchDailyReports(opts: DispatchOptions = {}): Promise<
   const target: 'slack' | 'mock' = useMock ? 'mock' : 'slack';
   const trigger = opts.trigger ?? 'manual';
 
-  const reports = await buildClientReports(opts.dateKey);
+  // In mock mode the client's own URL is unused, so do not require one.
+  const reports = await buildClientReports(opts.dateKey, !useMock);
   const queue = getSlackQueue();
 
   if (reports.length === 0) {
-    apiLog.warn({ trigger }, 'dispatch produced no reports — no opted-in client had data in the window');
-    return { report_date: opts.dateKey ?? '', enqueued: 0, clients: [], target };
+    const window = getReportWindow(opts.dateKey);
+    apiLog.warn(
+      { trigger, report_date: window.dateKey, require_webhook: !useMock },
+      'dispatch produced no reports — no enabled client had data in the window' +
+        (useMock ? '' : ' with a webhook URL set'),
+    );
+    return { report_date: window.dateKey, enqueued: 0, clients: [], target };
   }
 
   const reportDate = reports[0]!.report_date;

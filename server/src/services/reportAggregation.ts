@@ -22,18 +22,31 @@ export interface ClientReport {
  *                 ──$unwind──▶ drop clients with no spend in the window
  *                 ──$project─▶ ROAS via $divide, guarded by $cond
  */
-export async function buildClientReports(dateKey?: string): Promise<ClientReport[]> {
+export async function buildClientReports(
+  dateKey?: string,
+  requireWebhook = true,
+): Promise<ClientReport[]> {
   const window = getReportWindow(dateKey);
-  return runReportPipeline(window);
+  return runReportPipeline(window, requireWebhook);
 }
 
-export async function runReportPipeline(window: ReportWindow): Promise<ClientReport[]> {
+/**
+ * `requireWebhook` is false when delivering to the mock endpoint, where the
+ * producer replaces each client's URL anyway. Demanding a real webhook there
+ * would make a freshly deployed instance dispatch nothing at all until someone
+ * pasted live Slack credentials into it.
+ */
+export async function runReportPipeline(
+  window: ReportWindow,
+  requireWebhook = true,
+): Promise<ClientReport[]> {
   const rows = await Client.aggregate<Omit<ClientReport, 'report_date'>>([
-    // 1. Only clients who opted in AND actually have somewhere to send to.
+    // 1. Only clients who opted in — and, when sending to Slack for real, only
+    //    those that actually have somewhere to send to.
     {
       $match: {
         slack_notifications_enabled: true,
-        slack_webhook_url: { $exists: true, $nin: [null, ''] },
+        ...(requireWebhook ? { slack_webhook_url: { $exists: true, $nin: [null, ''] } } : {}),
       },
     },
 

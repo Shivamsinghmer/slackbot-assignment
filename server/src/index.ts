@@ -4,6 +4,7 @@ import { connectMongo, disconnectMongo } from './db/mongo.js';
 import { createApp } from './app.js';
 import { startScheduler } from './scheduler/cron.js';
 import { closeSlackQueue } from './queue/slackQueue.js';
+import { verifyRedis } from './queue/connection.js';
 import { createSlackWorker } from './worker/slackWorker.js';
 import { seedIfEmpty } from './services/seedData.js';
 import type { Worker } from 'bullmq';
@@ -13,6 +14,8 @@ async function main() {
   await connectMongo();
 
   if (env.AUTO_SEED) await seedIfEmpty();
+
+  await verifyRedis();
 
   const server = createApp().listen(env.PORT, () => {
     apiLog.info(

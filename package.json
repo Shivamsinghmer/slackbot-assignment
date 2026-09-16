@@ -14,5 +14,5 @@
     "redis:down": "docker compose down",
     "build": "npm run build --workspace server && npm run build --workspace client"
   },
-  "engines": { "node": ">=20" }
+  "engines": { "node": ">=20 <25" }
 }

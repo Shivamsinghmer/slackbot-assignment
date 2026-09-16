@@ -1,5 +1,6 @@
 import IORedis from 'ioredis';
 import { env } from '../config/env.js';
+import { logger } from '../lib/logger.js';
 
 /**
  * BullMQ requires maxRetriesPerRequest: null — otherwise ioredis aborts the
@@ -20,4 +21,40 @@ export function createRedisConnection(): IORedis {
     retryStrategy: (times) => Math.min(times * 200, 5000),
     ...(secure ? { tls: {} } : {}),
   });
+}
+
+/**
+ * Proves Redis is actually reachable, and says so plainly in the logs.
+ *
+ * Without this a bad REDIS_URL shows up only as the queue endpoints hanging,
+ * because BullMQ retries connection failures forever rather than surfacing
+ * them. Worth the one round trip at boot.
+ */
+export async function verifyRedis(): Promise<boolean> {
+  const started = Date.now();
+  const redis = new IORedis(env.REDIS_URL, {
+    maxRetriesPerRequest: 1,
+    connectTimeout: 10_000,
+    lazyConnect: true,
+    ...(env.REDIS_URL.startsWith('rediss://') ? { tls: {} } : {}),
+  });
+
+  try {
+    await redis.connect();
+    const pong = await redis.ping();
+    logger.info(
+      { ms: Date.now() - started, tls: env.REDIS_URL.startsWith('rediss://') },
+      `Redis reachable (${pong})`,
+    );
+    return true;
+  } catch (err) {
+    const host = env.REDIS_URL.replace(/\/\/[^@]*@/, '//***@');
+    logger.error(
+      { err: (err as Error).message, host, ms: Date.now() - started, node: process.version },
+      'Redis UNREACHABLE — queue endpoints will hang until this is fixed',
+    );
+    return false;
+  } finally {
+    redis.disconnect();
+  }
 }
